@@ -1,4 +1,13 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  ReactNode,
+} from 'react';
+import { categoryApi } from '@/services/categoryApi';
+import { message } from 'antd';
 
 export interface Category {
   id: number;
@@ -26,22 +35,18 @@ export interface TodoWithCategory extends Todo {
 interface TodoContextType {
   todos: TodoWithCategory[];
   categories: Category[];
+  categoriesLoading: boolean;
   addTodo: (todo: Omit<Todo, 'id' | 'created_at' | 'updated_at'>) => void;
   updateTodo: (id: number, updates: Partial<Todo>) => void;
   deleteTodo: (id: number) => void;
   toggleTodoComplete: (id: number) => void;
-  addCategory: (category: Omit<Category, 'id' | 'created_at'>) => void;
-  updateCategory: (id: number, updates: Partial<Category>) => void;
-  deleteCategory: (id: number) => void;
+  addCategory: (category: Omit<Category, 'id' | 'created_at'>) => Promise<void>;
+  updateCategory: (id: number, updates: Partial<Category>) => Promise<void>;
+  deleteCategory: (id: number) => Promise<void>;
+  refreshCategories: () => Promise<void>;
 }
 
 const TodoContext = createContext<TodoContextType | undefined>(undefined);
-
-const defaultCategories: Category[] = [
-  { id: 1, name: 'Work', color: '#3B82F6', created_at: new Date().toISOString() },
-  { id: 2, name: 'Personal', color: '#10B981', created_at: new Date().toISOString() },
-  { id: 3, name: 'Shopping', color: '#F59E0B', created_at: new Date().toISOString() },
-];
 
 const defaultTodos: Todo[] = [
   {
@@ -81,9 +86,32 @@ const defaultTodos: Todo[] = [
 
 export const TodoProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [todos, setTodos] = useState<Todo[]>(defaultTodos);
-  const [categories, setCategories] = useState<Category[]>(defaultCategories);
-  const [nextTodoId, setNextTodoId] = useState(4);
-  const [nextCategoryId, setNextCategoryId] = useState(4);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+
+  // Fetch categories from API
+  const fetchCategories = useCallback(async () => {
+    try {
+      setCategoriesLoading(true);
+      const response = await categoryApi.getCategories();
+      if (response.data) {
+        setCategories(response.data);
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch categories:', error);
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to load categories';
+      message.error(errorMessage);
+      // Fallback to empty array if API fails
+      setCategories([]);
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, []);
+
+  // Fetch categories on mount
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   const getTodosWithCategories = useCallback((): TodoWithCategory[] => {
     return todos.map((todo) => ({
@@ -92,17 +120,17 @@ export const TodoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }));
   }, [todos, categories]);
 
+  // Todo functions (still using local state for now)
   const addTodo = useCallback((todo: Omit<Todo, 'id' | 'created_at' | 'updated_at'>) => {
     const now = new Date().toISOString();
     const newTodo: Todo = {
       ...todo,
-      id: nextTodoId,
+      id: Date.now(), // Temporary ID
       created_at: now,
       updated_at: now,
     };
     setTodos((prev) => [newTodo, ...prev]);
-    setNextTodoId((prev) => prev + 1);
-  }, [nextTodoId]);
+  }, []);
 
   const updateTodo = useCallback((id: number, updates: Partial<Todo>) => {
     setTodos((prev) =>
@@ -128,36 +156,76 @@ export const TodoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     );
   }, []);
 
+  // Category functions with API integration
   const addCategory = useCallback(
-    (category: Omit<Category, 'id' | 'created_at'>) => {
-      const newCategory: Category = {
-        ...category,
-        id: nextCategoryId,
-        created_at: new Date().toISOString(),
-      };
-      setCategories((prev) => [...prev, newCategory]);
-      setNextCategoryId((prev) => prev + 1);
+    async (category: Omit<Category, 'id' | 'created_at'>) => {
+      try {
+        const response = await categoryApi.createCategory({
+          name: category.name,
+          color: category.color || '#3B82F6',
+        });
+
+        if (response.data) {
+          setCategories((prev) => [...prev, response.data!]);
+          message.success('Category created successfully');
+        }
+      } catch (error: any) {
+        console.error('Failed to create category:', error);
+        const errorMessage = error?.message || error?.response?.data?.message || 'Failed to create category';
+        message.error(errorMessage);
+        throw error;
+      }
     },
-    [nextCategoryId]
+    []
   );
 
-  const updateCategory = useCallback((id: number, updates: Partial<Category>) => {
-    setCategories((prev) =>
-      prev.map((category) => (category.id === id ? { ...category, ...updates } : category))
-    );
+  const updateCategory = useCallback(async (id: number, updates: Partial<Category>) => {
+    try {
+      const updateData: { name?: string; color?: string } = {};
+      if (updates.name !== undefined) updateData.name = updates.name;
+      if (updates.color !== undefined) updateData.color = updates.color;
+
+      const response = await categoryApi.updateCategory(id, updateData);
+
+      if (response.data) {
+        setCategories((prev) =>
+          prev.map((category) => (category.id === id ? response.data! : category))
+        );
+        message.success('Category updated successfully');
+      }
+    } catch (error: any) {
+      console.error('Failed to update category:', error);
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to update category';
+      message.error(errorMessage);
+      throw error;
+    }
   }, []);
 
-  const deleteCategory = useCallback((id: number) => {
-    setCategories((prev) => prev.filter((category) => category.id !== id));
-    // Remove category from todos
-    setTodos((prev) =>
-      prev.map((todo) => (todo.category_id === id ? { ...todo, category_id: null } : todo))
-    );
+  const deleteCategory = useCallback(async (id: number) => {
+    try {
+      await categoryApi.deleteCategory(id);
+      setCategories((prev) => prev.filter((category) => category.id !== id));
+      // Remove category from todos
+      setTodos((prev) =>
+        prev.map((todo) => (todo.category_id === id ? { ...todo, category_id: null } : todo))
+      );
+      message.success('Category deleted successfully');
+    } catch (error: any) {
+      console.error('Failed to delete category:', error);
+      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to delete category';
+      message.error(errorMessage);
+      throw error;
+    }
   }, []);
+
+  const refreshCategories = useCallback(async () => {
+    await fetchCategories();
+  }, [fetchCategories]);
 
   const value: TodoContextType = {
     todos: getTodosWithCategories(),
     categories,
+    categoriesLoading,
     addTodo,
     updateTodo,
     deleteTodo,
@@ -165,6 +233,7 @@ export const TodoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addCategory,
     updateCategory,
     deleteCategory,
+    refreshCategories,
   };
 
   return <TodoContext.Provider value={value}>{children}</TodoContext.Provider>;

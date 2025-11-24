@@ -30,7 +30,7 @@ export const TodoFilters: React.FC<TodoFiltersProps> = ({
       className="mb-6 p-4 rounded-lg shadow-soft"
       style={{ background: 'hsl(var(--card))' }}
     >
-      <Space direction="vertical" className="w-full" size="middle">
+      <Space orientation="vertical" className="w-full" size="middle">
         <Search
           placeholder="Search todos by title..."
           allowClear
