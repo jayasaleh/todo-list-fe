@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Button, List, Input, Form, Space, Popconfirm } from 'antd';
+import { Modal, Button, List, Input, Form, Space, Popconfirm, message } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useTodos, Category } from '@/contexts/TodoContext';
 
@@ -34,12 +34,14 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ open, onCancel
           name: values.name,
           color: selectedColor,
         });
+        message.success('Category updated successfully');
         setEditingId(null);
       } else {
         addCategory({
           name: values.name,
           color: selectedColor,
         });
+        message.success('Category added successfully');
       }
       
       form.resetFields();
@@ -126,7 +128,10 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ open, onCancel
                 key="delete"
                 title="Delete category"
                 description="Are you sure you want to delete this category?"
-                onConfirm={() => deleteCategory(category.id)}
+                onConfirm={() => {
+                  deleteCategory(category.id);
+                  message.success('Category deleted successfully');
+                }}
                 okText="Yes"
                 cancelText="No"
               >

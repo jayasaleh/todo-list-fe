@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Modal, Form, Input, Select, DatePicker, Button } from 'antd';
-import { useTodos, Todo } from '@/contexts/TodoContext';
+import React, { useEffect } from 'react';
+import { Modal, Form, Input, Select, DatePicker, Button, message } from 'antd';
+import { useTodos, TodoWithCategory } from '@/contexts/TodoContext';
 import dayjs from 'dayjs';
 
 interface TodoFormProps {
   open: boolean;
   onCancel: () => void;
-  editingTodo?: Todo | null;
+  editingTodo?: TodoWithCategory | null;
 }
 
 const { TextArea } = Input;
@@ -44,8 +44,10 @@ export const TodoForm: React.FC<TodoFormProps> = ({ open, onCancel, editingTodo 
 
       if (editingTodo) {
         updateTodo(editingTodo.id, todoData);
+        message.success('Todo updated successfully');
       } else {
         addTodo(todoData);
+        message.success('Todo created successfully');
       }
 
       form.resetFields();
