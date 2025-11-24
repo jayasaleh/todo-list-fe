@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
 import { Modal, Button, List, Input, Form, Space, Popconfirm, Spin, Empty } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
-import { useTodos, Category } from '@/contexts/TodoContext';
+import { useTodos } from '@/contexts/TodoContext';
+import { createCategorySchema, updateCategorySchema } from '@/validations';
+import { validateWithZod } from '@/utils/validation';
+import { Category } from '@/services/categoryApi';
 
 interface CategoryManagerProps {
   open: boolean;
@@ -37,24 +40,40 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ open, onCancel
       setSubmitting(true);
       const values = await form.validateFields();
 
+      // Validate with Zod before submitting
       if (editingId !== null) {
-        await updateCategory(editingId, {
+        const validatedData = validateWithZod(updateCategorySchema, {
           name: values.name,
           color: selectedColor,
         });
+
+        await updateCategory(editingId, {
+          name: validatedData.name,
+          color: validatedData.color,
+        });
         setEditingId(null);
       } else {
-        await addCategory({
+        const validatedData = validateWithZod(createCategorySchema, {
           name: values.name,
           color: selectedColor,
+        });
+
+        await addCategory({
+          name: validatedData.name,
+          color: validatedData.color,
         });
       }
 
       form.resetFields();
       setSelectedColor(predefinedColors[0]);
     } catch (error) {
-      // Error sudah di-handle di context dengan message.error
-      console.error('Failed to save category:', error);
+      if (error instanceof Error) {
+        // Zod validation error
+        console.error('Validation error:', error.message);
+      } else {
+        // API error (already handled in context)
+        console.error('API error:', error);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -93,13 +112,26 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ open, onCancel
         <Form form={form} layout="inline" onFinish={handleSubmit}>
           <Form.Item
             name="name"
-            rules={[{ required: true, message: 'Please enter category name' }]}
+            label="Category Name"
+            rules={[
+              { required: true, message: 'Category name is required' },
+              { min: 1, message: 'Category name cannot be empty' },
+              { max: 100, message: 'Category name must be less than 100 characters' },
+              {
+                validator: (_, value) => {
+                  if (value && value.trim().length === 0) {
+                    return Promise.reject(new Error('Category name cannot be only whitespace'));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
             style={{ flex: 1 }}
           >
             <Input placeholder="Category name" disabled={submitting} />
           </Form.Item>
 
-          <Form.Item>
+          <Form.Item label="Color">
             <Space>
               {predefinedColors.map((color) => (
                 <div
@@ -115,6 +147,7 @@ export const CategoryManager: React.FC<CategoryManagerProps> = ({ open, onCancel
                     border:
                       selectedColor === color ? '2px solid #000' : '2px solid transparent',
                   }}
+                  title={color}
                 />
               ))}
             </Space>

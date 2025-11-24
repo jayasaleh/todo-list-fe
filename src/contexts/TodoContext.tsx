@@ -1,231 +1,168 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useEffect,
-  ReactNode,
-} from 'react';
-import { categoryApi } from '@/services/categoryApi';
-import { message } from 'antd';
-
-export interface Category {
-  id: number;
-  name: string;
-  color: string;
-  created_at: string;
-}
-
-export interface Todo {
-  id: number;
-  title: string;
-  description: string;
-  completed: boolean;
-  category_id: number | null;
-  priority: 'high' | 'medium' | 'low';
-  due_date: string | null;
-  created_at: string;
-  updated_at: string;
-}
+import React, { createContext, useContext, useMemo, useState, ReactNode } from 'react';
+import { Category } from '@/services/categoryApi';
+import { Todo, TodoPaginationParams, UpdateTodoRequest } from '@/services/todoApi';
+import {
+  useTodosQuery,
+  useCreateTodo,
+  useUpdateTodo,
+  useDeleteTodo,
+  useToggleTodoComplete,
+} from '@/hooks/useTodos';
+import {
+  useCategoriesQuery,
+  useCreateCategory,
+  useUpdateCategory,
+  useDeleteCategory,
+} from '@/hooks/useCategories';
+import { PAGE_SIZE } from '@/constants';
 
 export interface TodoWithCategory extends Todo {
   category?: Category;
 }
 
+interface PaginationInfo {
+  current_page: number;
+  per_page: number;
+  total: number;
+  total_pages: number;
+}
+
 interface TodoContextType {
+  // State
   todos: TodoWithCategory[];
   categories: Category[];
+  todosLoading: boolean;
   categoriesLoading: boolean;
-  addTodo: (todo: Omit<Todo, 'id' | 'created_at' | 'updated_at'>) => void;
-  updateTodo: (id: number, updates: Partial<Todo>) => void;
-  deleteTodo: (id: number) => void;
-  toggleTodoComplete: (id: number) => void;
+  pagination: PaginationInfo | null;
+  
+  // Todo operations
+  fetchTodos: (params?: TodoPaginationParams) => void;
+  addTodo: (todo: Omit<Todo, 'id' | 'created_at' | 'updated_at' | 'category'>) => Promise<void>;
+  updateTodo: (id: number, updates: Partial<Todo>) => Promise<void>;
+  deleteTodo: (id: number) => Promise<void>;
+  toggleTodoComplete: (id: number) => Promise<void>;
+  
+  // Category operations
   addCategory: (category: Omit<Category, 'id' | 'created_at'>) => Promise<void>;
   updateCategory: (id: number, updates: Partial<Category>) => Promise<void>;
   deleteCategory: (id: number) => Promise<void>;
-  refreshCategories: () => Promise<void>;
+  refreshCategories: () => void;
 }
 
 const TodoContext = createContext<TodoContextType | undefined>(undefined);
 
-const defaultTodos: Todo[] = [
-  {
-    id: 1,
-    title: 'Complete coding challenge',
-    description: 'Build a full-stack todo application for Industrix',
-    completed: false,
-    category_id: 1,
-    priority: 'high',
-    due_date: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 2,
-    title: 'Review React documentation',
-    description: 'Study Context API and hooks patterns',
-    completed: true,
-    category_id: 1,
-    priority: 'medium',
-    due_date: null,
-    created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-  {
-    id: 3,
-    title: 'Grocery shopping',
-    description: 'Buy vegetables, fruits, and essentials',
-    completed: false,
-    category_id: 3,
-    priority: 'low',
-    due_date: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000).toISOString(),
-    created_at: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    updated_at: new Date().toISOString(),
-  },
-];
-
 export const TodoProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [todos, setTodos] = useState<Todo[]>(defaultTodos);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  // Todo queries and mutations - will be controlled by fetchTodos
+  const [queryParams, setQueryParams] = useState<TodoPaginationParams | undefined>({
+    page: 1,
+    limit: PAGE_SIZE,
+  });
+  const todosQuery = useTodosQuery(queryParams);
+  const createTodoMutation = useCreateTodo();
+  const updateTodoMutation = useUpdateTodo();
+  const deleteTodoMutation = useDeleteTodo();
+  const toggleTodoCompleteMutation = useToggleTodoComplete();
 
-  // Fetch categories from API
-  const fetchCategories = useCallback(async () => {
-    try {
-      setCategoriesLoading(true);
-      const response = await categoryApi.getCategories();
-      if (response.data) {
-        setCategories(response.data);
-      }
-    } catch (error: any) {
-      console.error('Failed to fetch categories:', error);
-      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to load categories';
-      message.error(errorMessage);
-      // Fallback to empty array if API fails
-      setCategories([]);
-    } finally {
-      setCategoriesLoading(false);
-    }
-  }, []);
+  // Category queries and mutations
+  const categoriesQuery = useCategoriesQuery();
+  const createCategoryMutation = useCreateCategory();
+  const updateCategoryMutation = useUpdateCategory();
+  const deleteCategoryMutation = useDeleteCategory();
 
-  // Fetch categories on mount
-  useEffect(() => {
-    fetchCategories();
-  }, [fetchCategories]);
-
-  const getTodosWithCategories = useCallback((): TodoWithCategory[] => {
+  // Get todos with categories
+  const todosWithCategories = useMemo((): TodoWithCategory[] => {
+    const todos = todosQuery.data?.data || [];
+    const categories = categoriesQuery.data?.data || [];
+    
     return todos.map((todo) => ({
       ...todo,
-      category: categories.find((cat) => cat.id === todo.category_id),
+      category: categories.find((cat) => cat.id === todo.category_id) || undefined,
     }));
-  }, [todos, categories]);
+  }, [todosQuery.data, categoriesQuery.data]);
 
-  // Todo functions (still using local state for now)
-  const addTodo = useCallback((todo: Omit<Todo, 'id' | 'created_at' | 'updated_at'>) => {
-    const now = new Date().toISOString();
-    const newTodo: Todo = {
-      ...todo,
-      id: Date.now(), // Temporary ID
-      created_at: now,
-      updated_at: now,
+  // Pagination info
+  const pagination = useMemo<PaginationInfo | null>(() => {
+    if (!todosQuery.data?.pagination) return null;
+    return {
+      current_page: todosQuery.data.pagination.current_page,
+      per_page: todosQuery.data.pagination.per_page,
+      total: todosQuery.data.pagination.total,
+      total_pages: todosQuery.data.pagination.total_pages,
     };
-    setTodos((prev) => [newTodo, ...prev]);
-  }, []);
+  }, [todosQuery.data?.pagination]);
 
-  const updateTodo = useCallback((id: number, updates: Partial<Todo>) => {
-    setTodos((prev) =>
-      prev.map((todo) =>
-        todo.id === id
-          ? { ...todo, ...updates, updated_at: new Date().toISOString() }
-          : todo
-      )
-    );
-  }, []);
-
-  const deleteTodo = useCallback((id: number) => {
-    setTodos((prev) => prev.filter((todo) => todo.id !== id));
-  }, []);
-
-  const toggleTodoComplete = useCallback((id: number) => {
-    setTodos((prev) =>
-      prev.map((todo) =>
-        todo.id === id
-          ? { ...todo, completed: !todo.completed, updated_at: new Date().toISOString() }
-          : todo
-      )
-    );
-  }, []);
-
-  // Category functions with API integration
-  const addCategory = useCallback(
-    async (category: Omit<Category, 'id' | 'created_at'>) => {
-      try {
-        const response = await categoryApi.createCategory({
-          name: category.name,
-          color: category.color || '#3B82F6',
-        });
-
-        if (response.data) {
-          setCategories((prev) => [...prev, response.data!]);
-          message.success('Category created successfully');
-        }
-      } catch (error: any) {
-        console.error('Failed to create category:', error);
-        const errorMessage = error?.message || error?.response?.data?.message || 'Failed to create category';
-        message.error(errorMessage);
-        throw error;
-      }
-    },
-    []
-  );
-
-  const updateCategory = useCallback(async (id: number, updates: Partial<Category>) => {
-    try {
-      const updateData: { name?: string; color?: string } = {};
-      if (updates.name !== undefined) updateData.name = updates.name;
-      if (updates.color !== undefined) updateData.color = updates.color;
-
-      const response = await categoryApi.updateCategory(id, updateData);
-
-      if (response.data) {
-        setCategories((prev) =>
-          prev.map((category) => (category.id === id ? response.data! : category))
-        );
-        message.success('Category updated successfully');
-      }
-    } catch (error: any) {
-      console.error('Failed to update category:', error);
-      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to update category';
-      message.error(errorMessage);
-      throw error;
+  // Todo operations
+  const fetchTodos = (params?: TodoPaginationParams) => {
+    // Update query params to trigger refetch
+    if (params) {
+      setQueryParams(params);
+    } else {
+      todosQuery.refetch();
     }
-  }, []);
+  };
 
-  const deleteCategory = useCallback(async (id: number) => {
-    try {
-      await categoryApi.deleteCategory(id);
-      setCategories((prev) => prev.filter((category) => category.id !== id));
-      // Remove category from todos
-      setTodos((prev) =>
-        prev.map((todo) => (todo.category_id === id ? { ...todo, category_id: null } : todo))
-      );
-      message.success('Category deleted successfully');
-    } catch (error: any) {
-      console.error('Failed to delete category:', error);
-      const errorMessage = error?.message || error?.response?.data?.message || 'Failed to delete category';
-      message.error(errorMessage);
-      throw error;
-    }
-  }, []);
+  const addTodo = async (todo: Omit<Todo, 'id' | 'created_at' | 'updated_at' | 'category'>) => {
+    await createTodoMutation.mutateAsync({
+      title: todo.title,
+      description: todo.description || '',
+      category_id: todo.category_id!,
+      priority: todo.priority,
+      due_date: todo.due_date || null,
+    });
+  };
 
-  const refreshCategories = useCallback(async () => {
-    await fetchCategories();
-  }, [fetchCategories]);
+  const updateTodo = async (id: number, updates: Partial<Todo>) => {
+    const updateData: UpdateTodoRequest = {};
+    
+    if (updates.title !== undefined) updateData.title = updates.title;
+    if (updates.description !== undefined) updateData.description = updates.description;
+    if (updates.category_id !== undefined) updateData.category_id = updates.category_id;
+    if (updates.priority !== undefined) updateData.priority = updates.priority;
+    if (updates.completed !== undefined) updateData.completed = updates.completed;
+    if (updates.due_date !== undefined) updateData.due_date = updates.due_date;
+
+    await updateTodoMutation.mutateAsync({ id, data: updateData });
+  };
+
+  const deleteTodo = async (id: number) => {
+    await deleteTodoMutation.mutateAsync(id);
+  };
+
+  const toggleTodoComplete = async (id: number) => {
+    await toggleTodoCompleteMutation.mutateAsync(id);
+  };
+
+  // Category operations
+  const addCategory = async (category: Omit<Category, 'id' | 'created_at'>) => {
+    await createCategoryMutation.mutateAsync({
+      name: category.name,
+      color: category.color || '#3B82F6',
+    });
+  };
+
+  const updateCategory = async (id: number, updates: Partial<Category>) => {
+    const updateData: { name?: string; color?: string } = {};
+    if (updates.name !== undefined) updateData.name = updates.name;
+    if (updates.color !== undefined) updateData.color = updates.color;
+
+    await updateCategoryMutation.mutateAsync({ id, data: updateData });
+  };
+
+  const deleteCategory = async (id: number) => {
+    await deleteCategoryMutation.mutateAsync(id);
+  };
+
+  const refreshCategories = () => {
+    categoriesQuery.refetch();
+  };
 
   const value: TodoContextType = {
-    todos: getTodosWithCategories(),
-    categories,
-    categoriesLoading,
+    todos: todosWithCategories,
+    categories: categoriesQuery.data?.data || [],
+    todosLoading: todosQuery.isLoading || todosQuery.isFetching,
+    categoriesLoading: categoriesQuery.isLoading || categoriesQuery.isFetching,
+    pagination,
+    fetchTodos,
     addTodo,
     updateTodo,
     deleteTodo,
@@ -246,3 +183,4 @@ export const useTodos = () => {
   }
   return context;
 };
+
